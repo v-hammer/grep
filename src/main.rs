@@ -1,30 +1,36 @@
 pub mod parser;
+pub mod matcher;
 
-fn report_error(e: parser::ParseError, input: &str) {
-    let pos = match e {
-        parser::ParseError::DanglingQuantifier(_, p)
-        | parser::ParseError::InvalidEscape(p)
-        | parser::ParseError::LackEscape(p)
-        | parser::ParseError::UnterminatedCharClass(p)
-        | parser::ParseError::UnterminatedGroup(p) => p,
-    };
+use std::env;
+use std::io;
+use std::process;
 
-    eprintln!("error: {}", e);
-    eprintln!("       {}", input);
-    let caret_pos = if pos <= input.len() { pos } else { input.len() };
-    eprintln!("       {}^", " ".repeat(caret_pos));
-}
-
+// Usage: echo <input_text> | your_program.sh -E <pattern>
 fn main() {
-    // let test_re = "\\d\\w[anc]";
-    // let re = parser::parse(test_re);
+    if env::args().nth(1).unwrap() != "-E" {
+        println!("Expected first argument to be '-E'");
+        process::exit(1);
+    }
 
-    let raw_re = "([^abc]+|(cat|dog123)[123]12)\\w";
-    let re = parser::parse(raw_re);
-    if let Err(e) = re {
-        report_error(e, raw_re);
-    } else {
+    let pattern = env::args().nth(2).unwrap();
+    let mut input_line = String::new();
+
+    io::stdin().read_line(&mut input_line).unwrap();
+
+    // Uncomment this block to pass the first stage
+    if let Ok(re) = parser::parse(&pattern) {
+        // println!("{re:?}");
         // dbg!(&re);
-        println!("{re:?}");
+        let res = matcher::r#match(&input_line, &re);
+        if res {
+            println!("code: 0");
+            process::exit(0)
+        } else {
+            println!("code: 1!!!");
+            process::exit(1)    
+        }
+    } else {
+        println!("code: 1!!!");
+        process::exit(1)
     }
 }

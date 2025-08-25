@@ -32,6 +32,7 @@ pub enum RE {
     NegClass(Vec<char>),
     Repeat(Box<RE>, Quantifier),
     Alt(Vec<RE>),
+    Group(usize, Box<RE>),
     BackRef(usize),
     AnchorStart,
     AnchorEnd,
@@ -40,10 +41,11 @@ pub enum RE {
 
 pub fn parse(raw_re: &str) -> Result<RE, ParseError> {
     let mut iter = raw_re.char_indices().peekable();
-    parse_seq(&mut iter)
+    let mut group_index = 0;
+    parse_seq(&mut iter, &mut group_index)
 }
 
-fn parse_seq<I>(iter: &mut Peekable<I>) -> Result<RE, ParseError>
+fn parse_seq<I>(iter: &mut Peekable<I>, group_index: &mut usize) -> Result<RE, ParseError>
 where
     I: Iterator<Item = (usize, char)>,
 {
@@ -51,9 +53,9 @@ where
 
     while let Some(&(pos, c)) = iter.peek() {
         let re = match c {
-            '^' => { iter.next(); RE::AnchorStart },
-            '$' => { iter.next(); RE::AnchorEnd },
-            '.' => { iter.next(); RE::Dot },
+            '^' => { iter.next(); RE::AnchorStart }
+            '$' => { iter.next(); RE::AnchorEnd }
+            '.' => { iter.next(); RE::Dot }
             '*' | '+' | '?' => {
                 iter.next();
                 if let Some(last) = seq.pop() {
@@ -71,12 +73,12 @@ where
             '\\' => {
                 let start_pos = pos;
                 iter.next();
-                if let Some(&(p2, next)) = iter.peek() {
+                if let Some(&(_, next)) = iter.peek() {
                     let r = match next {
                         'd' => RE::Digit,
                         'w' => RE::Word,
                         '1'..='9' => RE::BackRef(next.to_digit(10).unwrap() as usize),
-                        _ => return Err(ParseError::InvalidEscape(p2)),
+                        _ => return Err(ParseError::InvalidEscape(pos + 1)),
                     };
                     iter.next();
                     r
@@ -109,7 +111,7 @@ where
             }
             '(' => {
                 iter.next();
-                parse_group(iter)?
+                parse_group(iter, group_index)?
             }
             ')' | '|' => break,
             _ => { iter.next(); RE::Literal(c) },
@@ -120,15 +122,17 @@ where
     Ok(RE::Seq(seq))
 }
 
-fn parse_group<I>(iter: &mut Peekable<I>) -> Result<RE, ParseError>
+fn parse_group<I>(iter: &mut Peekable<I>, group_index: &mut usize) -> Result<RE, ParseError>
 where
     I: Iterator<Item = (usize, char)>,
 {
-    let mut alternatives: Vec<RE> = Vec::new();
+    *group_index += 1;
+    let my_idx = *group_index;
+    let mut alts: Vec<RE> = Vec::new();
 
     loop {
-        let seq = parse_seq(iter)?;
-        alternatives.push(seq);
+        let seq = parse_seq(iter, group_index)?;
+        alts.push(seq);
 
         match iter.peek() {
             Some(&(_, '|')) => { iter.next(); }
@@ -138,9 +142,6 @@ where
         }
     }
 
-    if alternatives.len() == 1 {
-        Ok(alternatives.pop().unwrap())
-    } else {
-        Ok(RE::Alt(alternatives))
-    }
+    let inner = if alts.len() == 1 { alts.remove(0) } else { RE::Alt(alts) };
+    Ok(RE::Group(my_idx, Box::new(inner)))
 }
